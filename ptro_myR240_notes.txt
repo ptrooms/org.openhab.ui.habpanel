@@ -1,0 +1,427 @@
+05feb23 tldr; Analyze NaN on interacrtive chart widget was caused by immuable "datapoint.state.replace(...);" in .../web/app/widgets/chart/chart.widget.js
+
+---
+date: 05feb23-14:00 - 05feb23 22:00
+Approach: check & locate the script reading data, fix the error en implement solution.
+Remark: the chart widget uses rest-api to get datapoints
+Issue: API is used to get data but if this does not process empty periods and we get NaN in graphs for switch items
+
+Investigation Plan: locate, check source and validity
+	0a) get/update our forked https://github.com/ptrooms/org.openhab.ui.habpanel
+	0b) locate en set our branch: myR240 for (all my ptrooms) changes
+
+	1) compile (offline) pafoxp@sh67:~/code-openhab/got-habpanel_R240 $ mvn clean install -o -DskipTests=true -Dcheckstyle.skip
+	2) use runtime jar: $ mv /home/pafoxp/code-openhab/got-habpanel_R240/target/org.openhab.ui.habpanel-2.4.0.jar to /media/Rdisk/Info/openhab/pafoqnap/addons
+
+	3a) Note original saved to rumntime: /media/Rdisk/Info/openhab/pafoqnap/userdata/org.openhab.ui.habpanel-2.4.0_org.jar
+	3b) base dupon MVN: /media/Rdisk/Info/openhab/pafoqnap/userdata/tmp/kar/openhab-addons-2.4.0/org/openhab/ui/org.openhab.ui.habpanel/2.4.0/org.openhab.ui.habpanel-2.4.0.jar
+	3c) as was originally supplied by KAR.zip in /media/Rdisk/Info/openhab/pafoqnap/userdata/tmp/kar/openhab-addons-2.4.0/org/openhab/ui/org.openhab.ui.habpanel/2.4.0/org.openhab.ui.habpanel-2.4.0.jar
+
+Check if we have the correct weblocation by setting & checking our own runtime favicon:
+	4a) test/add modification (success) add icon /home/pafoxp/code-openhab/got-habpanel_R240/web/assets/manifest/logo36p.png
+	4b) modified /home/pafoxp/code-openhab/got-habpanel_R240/web/index.html (using the new icon logo36p )
+	Note: this is also done to differentiate our modified habpanel from original
+
+Investigate FireFox browser result where "NaN"is displayed....
+	5a) open browser in source/inspect mode 
+	5b) analyse source, beautify tio idented sections and ... in long lines we see 'Nan's with section path class="line"
+	5c) part of upper located section ng-if="vm.widget.charttype==='interactive'"
+
+Now we have the data, we search where these are coming from
+	6a) search our habpanel repo for vm.widget.charttype==='interactive'
+	6b) points are generated online for angular by javascript: /web/app/widgets/chart/chart.widget.js
+
+Now we have de script & location and must search the cause for NaN
+	7a) data, via javascipt is retrieved by doing: $http.get('/rest/persistence/items/' .. foir the item
+	7b) Note: a switch type item is stored in RRD by either NaN, a 1 of 0 (all scrings) which is translated by API to  null/ON/OFF
+	7c) It apperars that the Javascript immuable tries to convert ON/OFF back to numertic for the chart
+		--> datapoint.state.replace("OFF",0);
+		--> datapoint.state.replace("ON",0);    
+	7d) this fails as the test does/didnot assign the value back which we corrected to 
+		--> datapoint.state = datapoint.state.replace("OFF",0);
+		--> datapoint.state = datapoint.state.replace("ON",1);
+	7e) we could/shpoud also add an extra test like : if (isNaN(datapoint.state)).....
+
+After applying the fix, the chart now nicely show 0/1 for OFF/ON item which are nummerically registered in RRD as 0/1
+
+Below the detailed workbook analysis of the section that shows the chart
+
+--- 
+
+chart is created by:  /home/pafoxp/code-openhab/got-habpanel_R240/web/app/widgets/chart/chart.widget.js
+		<div class="chart-content ng-scope" ng-if="vm.widget.charttype==='interactive'" style="height: calc(100% - 2em)">
+		feeded from ".. widget-chart ng-model="widget ... .. > via app/widgets/chart/chart.tpl.html
+				.....
+				<div class="chart-content" ng-if="vm.widget.charttype==='interactive'" style="height: calc(100% - 2em)">
+					<linechart ng-if="vm.interactiveChartReady" data="vm.datasets" options="vm.interactiveChartOptions"></linechart>
+				</div>
+			</div>
+		resulting
+			<div ng-if="vm.interactiveChartReady" data="vm.datasets" options="vm.interactiveChartOptions" class="ng-scope ng-isolate-scope">
+			<svg class="cha
+[/share/Rdisk/Info/openhab/pafoqnap/userdata] $ date -d @1675573200 Sun Feb  5 06:00:00 CET 2023
+
+rt" width="1693" height="463">	
+
+Strange behavior: (seconds)
+
+	api on switch item display 2 measures, before and after and skips if no measure
+
+	rrd	1675573140	Sun Feb 05 05:59:00 CET 2023	0.0000000000E00
+	rrd	1675573200	Sun Feb 05 06:00:00 CET 2023	0.0000000000E00
+			api		"time": 1675573200000,"state": "OFF"},
+			api		"time": 1675573200000,"state": "OFF"},
+	rrd	1675573260	Sun Feb 05 06:01:00 CET 2023	0.0000000000E00
+			api		"time": 1675573260000,"state": "OFF"},
+			api		"time": 1675573260000,"state": "OFF"},
+	rrd	1675573320	Sun Feb 05 06:02:00 CET 2023	NaN
+	rrd	1675573380	Sun Feb 05 06:03:00 CET 2023	NaN
+	rrd	1675573440	Sun Feb 05 06:04:00 CET 2023	NaN
+		until
+	rrd 1675576800	Sun Feb 05 07:00:00 CET 2023	NaN				(Sun Feb  5 07:00:00 CET 2023)
+	rrd 1675576860	Sun Feb 05 07:01:00 CET 2023	0.0000000000E00 (Sun Feb  5 07:00:00 CET 2023)
+			api		"time": 1675576860000,"state": "OFF"},		-- skipping to 7:01
+			api		"time": 1675576860000,"state": "OFF"},
+			api		"time": 1675576920000,"state": "OFF"},		-- skipping to 7:02
+			api		"time": 1675576920000,"state": "OFF"},
+			api		"time": 1675576980000,"state": "OFF"},		-- skipping to 7:03
+			api		"time": 1675576980000,"state": "OFF"},
+	rrd	1675576920	Sun Feb 05 07:02:00 CET 2023	0.0000000000E00
+			....
+	rrd	1675594800	Sun Feb 05 12:00:00 CET 2023	0.0000000000E00	(Sun Feb  5 12:00:00 CET 2023)
+			api "time": 1675594800000,"state": "OFF"},		Sun Feb  5 12:00:00 CET 2023
+			api "time": 1675594800000,"state": "OFF"},
+	rrd	1675594860	Sun Feb 05 12:01:00 CET 2023	1.0000000000E00	(Sun Feb  5 12:01:00 CET 2023)
+			api "time": 1675594860000,"state": "OFF"},		Sun Feb  5 12:01:00 CET 2023
+			api "time": 1675594860000,"state": "ON"},
+	rrd 1675594920	Sun Feb 05 12:02:00 CET 2023	1.0000000000E00	(Sun Feb  5 12:02:00 CET 2023)
+			api "time": 1675594920000,"state": "ON"},		Sun Feb  5 12:02:00 CET 2023
+			api "time": 1675594920000,"state": "ON"},
+
+Beautify the n3-chart result
+	<path class="line" d="M387.3471830985916,NaNL388.4830985915493,NaNL388.4830985915493,
+	<path class="line" d="M0,57.23584891547101L4.5436619718309865,57.23584891547101L9.087323943661973,
+
+
+
+// ----------------------------------------------------------------------------
+<!-- ngIf: !kioskMode -->
+	<div class="header ng-scope" ng-if="!kioskMode">
+	<a class="btn pull-left" title="Menu" snap-toggle="left">
+		    <i class="glyphicon glyphicon-menu-hamburger"></i>
+	</a>
+
+	<!-- ngIf: !settings.hide_fullscreen_button && !vm.dashboard.header.use_custom_widget -->
+		<a class="btn pull-right ng-scope" ng-click="vm.goFullscreen()" title="Fullscreen" ng-if="!settings.hide_fullscreen_button &amp;&amp; !vm.dashboard.header.use_custom_widget">
+				<i class="glyphicon glyphicon-resize-full"></i>
+		</a>
+	<!-- end ngIf: !settings.hide_fullscreen_button && !vm.dashboard.header.use_custom_widget -->
+
+	<!-- ngIf: !settings.hide_refresh_button && !vm.dashboard.header.use_custom_widget -->
+		<a class="btn pull-right ng-scope" ng-click="vm.refresh()" title="Refresh" ng-if="!settings.hide_refresh_button &amp;&amp; !vm.dashboard.header.use_custom_widget">
+				<i class="glyphicon glyphicon-refresh"></i>
+		</a>
+	<!-- end ngIf: !settings.hide_refresh_button && !vm.dashboard.header.use_custom_widget -->
+
+	<!-- ngIf: vm.supportsSpeech && !settings.floating_speech && !settings.hide_speak_button && !vm.dashboard.header.use_custom_widget -->
+	<!-- ngIf: !vm.dashboard.header.use_custom_widget -->
+		<h2 class="dashboard-title ng-scope" ng-if="!vm.dashboard.header.use_custom_widget">
+			<!-- ngIf: settings.show_header_clock -->
+				<small class="header-clock ng-scope" ng-if="settings.show_header_clock">
+				<ds-widget-clock show-digital="" digital-format="settings.header_clock_format || 'shortTime'" class="ng-isolate-scope">
+
+				<!-- ngIf: date -->
+					<div class="widget-clock ng-scope light" ng-class="themeClass" ng-if="date">
+					<!-- ngIf: digital -->
+						<div class="digital ng-scope" ng-if="digital">
+							<span class="time">
+								<span class="hours ng-binding">15:19</span>
+							</span>
+						</div>
+					<!-- end ngIf: digital -->
+
+					<!-- ngIf: analog -->
+					<!-- ngIf: gmtInfo -->
+					</div>
+				<!-- end ngIf: date -->
+
+				</ds-widget-clock>
+				</small>
+			<!-- end ngIf: settings.show_header_clock -->
+
+			<span class="ng-binding">chart_debug
+				<!-- ngIf: !lockEditing -->
+					<a class="btn btn-link btn-edit-dashboard ng-scope" ng-if="!lockEditing" ng-click="vm.toggleEdit()" title="Edit chart_debug">
+									<i class="glyphicon glyphicon-pencil"></i>
+								</a>
+				<!-- end ngIf: !lockEditing -->
+			</span>
+		</h2>
+	<!-- end ngIf: !vm.dashboard.header.use_custom_widget -->
+
+	<!-- ngIf: vm.dashboard.header.use_custom_widget -->
+	</div>
+<!-- end ngIf: !kioskMode -->
+
+<!-- ngIf: vm.isListening -->
+<!-- ngIf: vm.supportsSpeech && settings.floating_speech -->
+
+<div class="scrollable ng-scope gridster gridster-desktop gridster-loaded" ng-show="vm.ready" gridster="vm.gridsterOptions" style="height: 521px;">
+	<!-- ngIf: gridster.movingItem -->
+    <ul>
+		<!-- ngRepeat: widget in vm.dashboard.widgets -->
+		<li gridster-item="widget" ng-repeat="widget in vm.dashboard.widgets" class="ng-scope gridster-item" style="margin: 0px; top: 5px; left: 176.75px; width: 1712.5px; height: 511px;">
+			<div class="box" ng-style="{'font-size': vm.dashboard.font_scale ? vm.dashboard.font_scale + '%' : undefined }">
+				<generic-widget type="widget.type" ng-model="widget" class="ng-pristine ng-untouched ng-valid ng-isolate-scope ng-not-empty">
+					<widget-chart ng-model="ngModel" class="ng-pristine ng-untouched ng-valid ng-scope ng-isolate-scope ng-not-empty">
+						<div class="box-content chart">
+							<!-- ngIf: vm.widget.charttype==='default' -->
+							<!-- ngIf: vm.widget.charttype==='rrd4j' -->
+							<!-- ngIf: vm.widget.charttype==='interactive' -->
+						<div class="chart-content ng-scope" ng-if="vm.widget.charttype==='interactive'" style="height: calc(100% - 2em)">
+
+						<!-- ngIf: vm.interactiveChartReady -->
+						<div ng-if="vm.interactiveChartReady" data="vm.datasets" options="vm.interactiveChartOptions" class="ng-scope ng-isolate-scope">
+							<svg class="chart" width="1693" height="463">
+								<defs>
+									<clipPath id="clipping-path-a295aab6-cdf7-4c5a-92cf-293fe5d3f612">
+										<rect id="clipping-rect" width="1613" height="423"></rect>
+									</clipPath>
+								</defs>
+
+								<g class="container" width="1613" height="423" transform="translate(40,0)">
+									<g class="axes">
+										<g class="grid">
+											<g class="x-grid" style="display: none;"></g>
+											<g class="y-grid">
+													<g class="tick" style="opacity: 1;" transform="translate(0,	395.1923391783629)">
+														<line x2="1613" y2="0"></line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.30</text>
+													</g>
+													<g class="tick" style="opacity: 1;" transform="translate(0,	325.6422432256474)">
+														<line x2="1613" y2="0">	</line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.35</text>
+													</g>
+													<g class="tick" style="opacity: 1;" transform="translate(0,	256.0921472729317)">
+													<line x2="1613" y2="0">
+													</line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.40</text>
+													</g>
+													<g class="tick" style="opacity: 1;" transform="translate(0,	186.54205132021613)">
+														<line x2="1613" y2="0">
+														</line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.45</text>
+													</g>
+													<g class="tick" style="opacity: 1;" transform="translate(0,	116.99195536750054)">
+														<line x2="1613" y2="0">
+														</line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.50</text>
+													</g>
+													<g class="tick" style="opacity: 1;" transform="translate(0,	47.44185941478488)">
+														<line x2="1613" y2="0">
+														</line>
+														<text dy=".32em" style="text-anchor: end;" x="-3" y="0">0.55</text>
+													</g>
+													<path class="domain" d="M0,8H0V423H0"></path>
+												</g>
+											</g>
+											<g class="axis x-axis" transform="translate(0,423)">
+												<g class="tick" style="opacity: 1;" transform="translate(181.74647887323945,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">18:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(386.2112676056338,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">21:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(590.6760563380282,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">Sun 5</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(795.1408450704225,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">03:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(999.6056338028168,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">06:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(1204.0704225352113,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">09:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(1408.5352112676055,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0,0)" x="0">12:00</text>
+												</g>
+												<g class="tick" style="opacity: 1;" transform="translate(1613,0)">
+													<line y2="6" x2="0"></line>
+													<text dy=".71em" style="text-anchor: middle;" y="9" transform="translate(0, 0)" x="0">15:00</text>
+												</g>
+												<path class="domain" d="M0,6V0H1613V6"></path>
+											</g>
+
+										<g class="axis x2-axis" transform="translate(0, 0)">
+											<g class="tick" style="opacity: 1;" transform="translate(181.74647887323945,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">18:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(386.2112676056338,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">21:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(590.6760563380282,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">Sun 5</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(795.1408450704225,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0, 0)" x="0">03:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(999.6056338028168,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">06:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(1204.0704225352113,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">09:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(1408.5352112676055,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">12:00</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(1613,0)">
+												<line y2="-6" x2="0"></line>
+												<text dy="0em" style="text-anchor: middle;" y="-9" transform="translate(0,0)" x="0">15:00</text>
+											</g>
+											<path class="domain" d="M0,,6V0H1613V-6"></path>
+										</g>
+											<g class="axis y-axis" transform="translate(0,0)">
+											<g class="tick" style="opacity: 1;" transform="translate(0,395.1923391783629)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.30</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,325.6422432256474)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.35</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,256.0921472729317)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.40</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,186.54205132021613)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.45</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,116.99195536750054)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.50</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,47.44185941478488)">
+												<line x2="-6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: end;" x="-9" transform="translate(0,0)" y="0">0.55</text>
+											</g>
+											<path class="domain" d="M-6,8H0V423H-6"></path>
+										</g>
+										<g class="axis y2-axis" transform="translate(1613,0)">
+											<g class="tick" style="opacity: 1;" transform="translate(0,423)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">200</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,359.15384615384613)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">400</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,295.30769230769226)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">600</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,231.46153846153842)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">800</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,167.6153846153846)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">1,000</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,103.76923076923076)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">1,200</text>
+											</g>
+											<g class="tick" style="opacity: 1;" transform="translate(0,39.923076923076906)">
+												<line x2="6" y2="0"></line>
+												<text dy=".32em" style="text-anchor: start;" x="9" transform="translate(0,0)" y="0">1,400</text>
+											</g>
+											<path class="domain" d="M6,8H0V423H6"></path>
+										</g>
+									</g>
+
+									<g class="data" clip-path="url(#clipping-path-a295aab6-cdf7-4c5a-92cf-293fe5d3f612)">
+										<g class="area-data"></g>
+										<g class="column-data"></g>
+										<g class="line-data">
+											<g class="line-series TibberHourlyConsumption" style="fill: none; stroke: rgb(255,153,0);">
+												<path class="line" d="M0,57.23584891547101L4.5436619718309865,57.23584891547101L9.087323943661973,57.23584891547101L13.630985915492957,57.23584891547101L18.174647887323946,57.23584891547101L22.71830985915493,57.23584891547101L27.261971830985914,57.23584891547101L31.805633802816903,57.23584891547101L36.34929577464789,57.23584891547101L40.89295774647888,57.23584891547101L45.43661971830986,57.22160489864457L49.98028169014085,78.02621940619522L54.52394366197183,78.02621940619522L59.06760563380281,78.02621940619522L63.611267605633806,78.02621940619522L68.15492957746478,78.02621940619522L72.69859154929578,78.02621940619522L77.24225352112676,78.02621940619522L81.78591549295776,78.02621940619522L86.32957746478873,78.02621940619522L90.87323943661973,78.02621940619522L95.4169014084507,78.02621940619522L99.9605633802817,78.02621940619522L104.50422535211267,78.02621940619522L109.04788732394366,78.02621940619522L113.59154929577466,78.0306399631414L118.13521126760563,76.65447146850623L122.67887323943661,76.65447146850623L127.22253521126761,76.65447146850623L131.7661971830986,76.65447146850623L136.30985915492957,76.65447146850623L140.85352112676057,76.65447146850623L145.39718309859157,76.65447146850623L149.94084507042254,76.65447146850623L154.4845070422535,76.65447146850623L159.02816901408448,76.65447146850623L163.5718309859155,76.65447146850623L168.11549295774648,76.65447146850623L172.65915492957745,76.65447146850623L177.20281690140845,76.65447146850623L181.74647887323945,76.65407853011105L186.29014084507043,34.98178290257798L190.8338028169014,34.98178290257798L195.3774647887324,34.98178290257798L199.9211267605634,34.98178290257798L204.46478873239437,34.98178290257798L209.00845070422534,34.98178290257798L213.5521126760563,34.98178290257798L218.0957746478873,34.98178290257798L222.63943661971834,34.98178290257798L227.1830985915493,34.98178290257798L231.72676056338028,34.98178290257798L236.27042253521125,34.98178290257798L240.81408450704225,34.98178290257798L245.35774647887322,34.98178290257798L249.9014084507042,34.967047712757434L254.44507042253522,100.20759181597371L258.9887323943662,100.20759181597371L263.5323943661972,100.20759181597371L268.0760563380282,100.20759181597371L272.61971830985914,100.20759181597371L277.16338028169014,100.20759181597371L281.70704225352114,100.20759181597371L286.25070422535214,100.20759181597371L290.79436619718314,100.20759181597371L295.3380281690141,100.20759181597371L299.8816901408451,100.20759181597371L304.4253521126761,100.20759181597371L308.969014084507,100.20759181597371L313.512676056338,100.20759181597371L318.05633802816897,100.23067694669253L322.6,71.12495505142451L327.143661971831,71.12495505142451L331.68732394366197,71.12495505142451L336.23098591549297,71.12495505142451L340.77464788732397,71.12495505142451L345.3183098591549,71.12495505142451L349.8619718309859,71.12495505142451L354.4056338028169,71.12495505142451L358.9492957746479,71.12495505142451L363.4929577464789,71.12495505142451L368.03661971830985,71.12495505142451L372.58028169014085,71.12495505142451L377.1239436619718,71.12495505142451L381.6676056338028,39.943843885186354L386.2112676056338,8L390.7549295774648,8.4906621741026L395.2985915492958,8.4906621741026L399.8422535211268,8.4906621741026L404.38591549295774,8.4906621741026L408.92957746478874,8.4906621741026L413.4732394366197,8.4906621741026L418.0169014084507,8.4906621741026L422.5605633802817,8.4906621741026L427.1042253521126,8.4906621741026L431.6478873239436,8.4906621741026L436.1915492957746,8.4906621741026L440.7352112676057,8.4906621741026L445.2788732394367,8.4906621741026L449.8225352112676,8.4906621741026L454.3661971830986,8.491448050892966L458.9098591549296,61.30708362827381L463.45352112676056,61.30708362827381L467.99718309859156,61.30708362827381L472.5408450704225,61.30708362827381L477.0845070422535,61.30708362827381L481.6281690140845,61.30708362827381L486.17183098591545,61.30708362827381L490.71549295774645,61.30708362827381L495.25915492957745,61.30708362827381L499.8028169014084,61.30708362827381L504.3464788732395,61.30708362827381L508.89014084507045,61.30708362827381L513.4338028169014,61.30708362827381L517.9774647887324,61.30708362827381L522.5211267605634,61.31828237253735L527.0647887323944,57.18594573927885L531.6084507042253,57.18594573927885L536.1521126760564,57.18594573927885L540.6957746478873,57.18594573927885L545.2394366197183,57.18594573927885L549.7830985915493,57.18594573927885L554.3267605633803,57.18594573927885L558.8704225352112,57.18594573927885L563.4140845070423,57.18594573927885L567.9577464788732,57.18594573927885L572.5014084507043,57.18594573927885L577.0450704225352,57.18594573927885L581.5887323943663,57.18594573927885L586.1323943661972,57.18594573927885L590.6760563380282,57.184177516500405L595.2197183098592,165.55442575509494L599.7633802816902,165.55442575509494L604.3070422535211,165.55442575509494L608.8507042253522,165.55442575509494L613.3943661971831,165.55442575509494L617.938028169014,165.55442575509494L622.4816901408451,165.55442575509494L627.025352112676,165.55442575509494L631.569014084507,165.55442575509494L636.1126760563379,165.55442575509494L640.6563380281691,165.55442575509494L645.2,165.55442575509494L649.743661971831,165.55442575509494L654.287323943662,165.55442575509494L658.830985915493,165.58507494992156L663.3746478873239,255.98998329017638L667.918309859155,255.98998329017638L672.4619718309859,255.98998329017638L677.0056338028169,255.98998329017638L681.5492957746479,255.98998329017638L686.0929577464789,255.98998329017638L690.6366197183098,255.98998329017638L695.1802816901408,255.98998329017638L699.7239436619718,255.98998329017638L704.2676056338028,255.98998329017638L708.8112676056338,255.98998329017638L713.3549295774649,255.98998329017638L717.8985915492958,255.98998329017638L722.4422535211268,255.98998329017638L726.9859154929578,256.01552428586524L731.5295774647888,347.82047212826404L736.0732394366197,347.82047212826404L740.6169014084508,347.82047212826404L745.1605633802817,347.82047212826404L749.7042253521126,347.82047212826404L754.2478873239436,347.82047212826404L758.7915492957746,347.82047212826404L763.3352112676056,347.82047212826404L767.8788732394365,347.82047212826404L772.4225352112676,347.82047212826404L776.9661971830986,347.82047212826404L781.5098591549296,347.82047212826404L786.0535211267606,347.82047212826404L790.5971830985916,347.82047212826404L795.1408450704225,347.83992257882704L799.6845070422536,390.9462468796904L804.2281690140845,390.9462468796904L808.7718309859155,390.9462468796904L813.3154929577464,390.9462468796904L817.8591549295775,390.9462468796904L822.4028169014084,390.9462468796904L826.9464788732394,390.9462468796904L831.4901408450704,390.9462468796904L836.0338028169014,390.9462468796904L840.5774647887323,390.9462468796904L845.1211267605634,390.9462468796904L849.6647887323943,390.9462468796904L854.2084507042252,390.9462468796904L858.7521126760563,390.9462468796904L863.2957746478872,390.9645185150679L867.8394366197182,413.22506801148177L872.3830985915492,413.22506801148177L876.9267605633804,413.22506801148177L881.4704225352114,413.22506801148177L886.0140845070423,413.22506801148177L890.5577464788734,413.22506801148177L895.1014084507043,413.22506801148177L899.6450704225352,413.22506801148177L904.1887323943663,413.22506801148177L908.7323943661972,413.22506801148177L913.2760563380282,413.22506801148177L917.8197183098592,413.22506801148177L922.3633802816902,413.22506801148177L926.9070422535211,413.22506801148177L931.4507042253521,413.2376420401286L935.9943661971831,404.9482136547134L940.5380281690141,404.9482136547134L945.081690140845,404.9482136547134L949.6253521126761,404.9482136547134L954.169014084507,404.9482136547134L958.712676056338,404.9482136547134L963.256338028169,404.9482136547134L967.8,404.9482136547134L972.3436619718309,404.9482136547134L976.887323943662,404.9482136547134L981.4309859154929,404.9482136547134L985.9746478873238,404.9482136547134L990.5183098591549,404.9482136547134L995.0619718309858,404.9482136547134L999.6056338028168,404.9434983939709L1004.1492957746478,410.4886450272179L1008.692957746479,410.4886450272179L1013.23661971831,410.4886450272179L1017.7802816901409,410.4886450272179L1022.323943661972,410.4886450272179L1026.867605633803,410.4886450272179L1031.4112676056338,410.4886450272179L1035.9549295774648,410.4886450272179L1040.4985915492957,410.4886450272179L1045.042253521127,410.4886450272179L1049.5859154929578,410.4886450272179L1054.1295774647888,410.4886450272179L1058.6732394366197,410.4886450272179L1063.2169014084507,410.4886450272179L1067.7605633802816,410.48982384240355L1072.3042253521128,389.6578018817868L1076.8478873239437,389.6578018817868L1081.3915492957747,389.6578018817868L1085.9352112676056,389.6578018817868L1090.4788732394366,389.6578018817868L1095.0225352112675,389.6578018817868L1099.5661971830987,389.6578018817868L1104.1098591549296,389.6578018817868L1108.6535211267606,389.6578018817868L1113.1971830985915,389.6578018817868L1117.7408450704224,389.6578018817868L1122.2845070422534,389.6578018817868L1126.8281690140846,389.6578018817868L1131.3718309859155,389.6578018817868L1135.9154929577464,389.6504342868765L1140.4591549295774,353.5031471998358L1145.0028169014086,353.5031471998358L1149.5464788732395,353.5031471998358L1154.0901408450704,353.5031471998358L1158.6338028169014,353.5031471998358L1163.1774647887326,353.5031471998358L1167.7211267605635,353.5031471998358L1172.2647887323944,353.5031471998358L1176.8084507042254,353.5031471998358L1181.3521126760563,353.5031471998358L1185.8957746478873,353.5031471998358L1190.4394366197184,353.5031471998358L1194.9830985915494,353.5031471998358L1199.5267605633803,353.5031471998358L1204.0704225352113,353.4929308015603L1208.6140845070422,403.49591334600586L1213.1577464788732,403.49591334600586L1217.7014084507043,403.49591334600586L1222.2450704225353,403.49591334600586L1226.7887323943662,403.49591334600586L1231.3323943661971,403.49591334600586L1235.876056338028,403.49591334600586L1240.419718309859,403.49591334600586L1244.9633802816902,403.49591334600586L1249.5070422535211,403.49591334600586L1254.050704225352,403.49591334600586L1258.594366197183,403.49591334600586L1263.138028169014,403.49591334600586L1267.681690140845,403.49591334600586L1272.2253521126759,403.50652268267663L1276.769014084507,422.9958741468502L1281.3126760563382,422.9958741468502L1285.8563380281691,422.9958741468502L1290.4,422.9958741468502L1294.943661971831,422.9958741468502L1299.487323943662,422.9958741468502L1304.030985915493,422.9958741468502L1308.574647887324,422.9958741468502L1313.118309859155,422.9958741468502L1317.661971830986,422.9958741468502L1322.205633802817,422.9958741468502L1326.7492957746479,422.9958741468502L1331.2929577464788,422.9958741468502L1335.83661971831,422.9958741468502L1340.380281690141,423L1344.9239436619719,410.50750607018813L1349.4676056338028,410.50750607018813L1354.0112676056337,410.50750607018813L1358.5549295774647,410.50750607018813L1363.0985915492959,410.50750607018813L1367.6422535211268,410.50750607018813L1372.1859154929577,410.50750607018813L1376.7295774647887,410.50750607018813L1381.2732394366196,410.50750607018813L1385.8169014084506,410.50750607018813L1390.3605633802815,410.50750607018813L1394.9042253521127,410.50750607018813L1399.4478873239436,410.50750607018813L1403.9915492957746,410.50750607018813L1408.5352112676055,410.5039696246312L1413.0788732394367,253.44334955080043L1417.6225352112676,253.44334955080043L1422.1661971830986,253.44334955080043L1426.7098591549297,253.44334955080043L1431.2535211267607,253.44334955080043L1435.7971830985916,253.44334955080043L1440.3408450704226,253.44334955080043L1444.8845070422535,253.44334955080043L1449.4281690140845,253.44334955080043L1453.9718309859156,253.44334955080043L1458.5154929577466,253.44334955080043L1463.0591549295775,253.44334955080043L1467.6028169014085,253.44334955080043L1472.1464788732394,253.44334955080043L1476.6901408450703,253.4100480218061L1481.2338028169015,149.07341064467278L1485.7774647887325,149.07341064467278L1490.3211267605634,149.07341064467278L1494.8647887323943,149.07341064467278L1499.4084507042253,149.07341064467278L1503.9521126760562,149.07341064467278L1508.4957746478872,149.07341064467278L1513.0394366197183,149.07341064467278L1517.5830985915493,149.07341064467278L1522.1267605633802,149.07341064467278L1526.6704225352112,149.07341064467278L1531.2140845070421,149.07341064467278L1535.757746478873,149.07341064467278L1540.3014084507042,149.07341064467278L1544.8450704225352,149.05130785994203L1549.3887323943663,35.01950498851845L1553.9323943661973,35.01950498851845L1558.4760563380282,35.01950498851845L1563.0197183098592,35.01950498851845L1567.5633802816901,35.01950498851845L1572.1070422535213,35.01950498851845L1576.6507042253522,35.01950498851845L1581.1943661971832,35.01950498851845L1585.7380281690141,35.01950498851845L1590.281690140845,35.01950498851845L1594.825352112676,35.01950498851845L1599.3690140845072,35.01950498851845L1603.9126760563381,35.01950498851845L1608.456338028169,35.01950498851845L1613,34.9953392772128" style="opacity: 1;">
+												</path>
+											</g>
+											<g class="line-series a006" style="fill: none; stroke: rgb(0,255,255);">
+												<path class="line" d="M387.3471830985916,NaNL388.4830985915493,NaNL388.4830985915493,NaNL389.61901408450706,NaNL389.61901408450706,NaNL390.7549295774648,NaNL390.7549295774648,NaNL391.89084507042253,NaNL391.89084507042253,NaNL393.0267605633803,NaNL393.0267605633803,NaNL394.16267605633806,NaNL394.16267605633806,NaNL395.2985915492958,NaNL395.2985915492958,NaNL396.43450704225353,NaNL396.43450704225353,NaNL397.57042253521126,NaNL397.57042253521126,NaNL398.706338028169,NaNL398.706338028169,NaNL399.8422535211268,NaNL399.8422535211268,NaNL400.97816901408453,NaNL400.97816901408453,NaNL402.11408450704226,NaNL402.11408450704226,NaNL403.25,NaNL403.25,NaNL404.38591549295774,NaNL404.38591549295774,NaNL405.52183098591547,NaNL405.52183098591547,NaNL406.6577464788732,NaNL406.6577464788732,NaNL407.793661971831,NaNL407.793661971831,NaNL408.92957746478874,NaNL408.92957746478874,NaNL410.06549295774647,NaNL410.06549295774647,NaNL411.2014084507042,NaNL411.2014084507042,NaNL412.33732394366194,NaNL412.33732394366194,NaNL413.4732394366197,NaNL413.4732394366197,NaNL414.60915492957747,NaNL414.60915492957747,NaNL415.7450704225352,NaNL415.7450704225352,NaNL416.88098591549294,NaNL416.88098591549294,NaNL418.0169014084507,NaNL418.0169014084507,NaNL419.1528169014084,NaNL419.1528169014084,NaNL420.28873239436615,NaNL420.28873239436615,NaNL421.42464788732394,NaNL421.42464788732394,NaNL422.5605633802817,NaNL422.5605633802817,NaNL423.6964788732394,NaNL423.6964788732394,NaNL424.83239436619715,NaNL424.83239436619715,NaNL425.9683098591549,NaNL425.9683098591549,NaNL427.1042253521126,NaNL427.1042253521126,NaNL428.2401408450704,NaNL428.2401408450704,NaNL429.37605633802815,NaNL429.37605633802815,NaNL430.5119718309859,NaNL430.5119718309859,NaNL431.6478873239436,NaNL431.6478873239436,NaNL432.78380281690136,NaNL432.78380281690136,NaNL433.9197183098591,NaNL433.9197183098591,NaNL435.0556338028169,NaNL435.0556338028169,NaNL436.1915492957746,NaNL436.1915492957746,NaNL437.3274647887324,NaNL437.3274647887324,NaNL438.4633802816902,NaNL438.4633802816902,NaNL439.59929577464794,NaNL439.59929577464794,NaNL440.7352112676057,NaNL440.7352112676057,NaNL441.8711267605634,NaNL441.8711267605634,NaNL443.00704225352115,NaNL443.00704225352115,NaNL444.1429577464789,NaNL444.1429577464789,NaNL445.2788732394367,NaNL445.2788732394367,NaNL446.4147887323944,NaNL446.4147887323944,NaNL447.55070422535215,NaNL447.55070422535215,NaNL448.6866197183099,NaNL448.6866197183099,NaNL449.8225352112676,NaNL449.8225352112676,NaNL450.95845070422536,NaNL450.95845070422536,NaNL452.09436619718315,NaNL452.09436619718315,NaNL453.2302816901409,NaNL453.2302816901409,NaNL454.3661971830986,NaNL454.3661971830986,NaNL455.50211267605636,NaNL455.50211267605636,NaNL456.6380281690141,NaNL456.6380281690141,NaNL457.7739436619718,NaNL457.7739436619718,NaNL458.9098591549296,NaNL458.9098591549296,NaNL460.04577464788736,NaNL460.04577464788736,NaNL461.1816901408451,NaNL461.1816901408451,NaNL462.3176056338028,NaNL462.3176056338028,NaNL463.45352112676056,NaNL463.45352112676056,NaNL464.5894366197183,NaNL464.5894366197183,NaNL465.72535211267603,NaNL465.72535211267603,NaNL466.8612676056338,NaNL466.8612676056338,NaNL467.99718309859156,NaNL467.99718309859156,NaNL469.1330985915493,NaNL469.1330985915493,NaNL470.26901408450703,NaNL470.26901408450703,NaNL471.40492957746477,NaNL471.40492957746477,NaNL472.5408450704225,NaNL472.5408450704225,NaNL473.6767605633803,NaNL473.6767605633803,NaNL474.81267605633803,NaNL474.81267605633803,NaNL475.94859154929577,NaNL475.94859154929577,NaNL477.0845070422535,NaNL477.0845070422535,NaNL478.22042253521124,NaNL478.22042253521124,NaNL479.356338028169,NaNL479.356338028169,NaNL480.49225352112677,NaNL480.49225352112677,NaNL481.6281690140845,NaNL481.6281690140845,NaNL482.76408450704224,NaNL482.76408450704224,NaNL483.9,NaNL483.9,NaNL485.0359154929577,NaNL485.0359154929577,NaNL486.17183098591545,NaNL486.17183098591545,NaNL487.30774647887324,NaNL487.30774647887324,NaNL488.443661971831,NaNL488.443661971831,NaNL489.5795774647887,NaNL489.5795774647887,NaNL490.71549295774645,NaNL490.71549295774645,NaNL491.8514084507042,NaNL491.8514084507042,NaNL492.9873239436619,NaNL492.9873239436619,NaNL494.1232394366197,NaNL494.1232394366197,NaNL495.25915492957745,NaNL495.25915492957745,NaNL496.3950704225352,NaNL496.3950704225352,NaNL497.5309859154929,NaNL497.5309859154929,NaNL498.66690140845066,NaNL498.66690140845066,NaNL499.8028169014084,NaNL499.8028169014084,NaNL500.9387323943662,NaNL500.9387323943662,NaNL502.0746478873239,NaNL502.0746478873239,NaNL503.21056338028166,NaNL503.21056338028166,NaNL504.3464788732395,NaNL504.3464788732395,NaNL505.48239436619724,NaNL505.48239436619724,NaNL506.618309859155,NaNL506.618309859155,NaNL507.7542253521127,NaNL507.7542253521127,NaNL508.89014084507045,NaNL508.89014084507045,NaNL510.0260563380282,NaNL510.0260563380282,NaNL511.161971830986,NaNL511.161971830986,NaNL512.2978873239437,NaNL512.2978873239437,NaNL513.4338028169014,NaNL513.4338028169014,NaNL514.5697183098592,NaNL514.5697183098592,NaNL515.7056338028169,NaNL515.7056338028169,NaNL516.8415492957747,NaNL516.8415492957747,NaNL517.9774647887324,NaNL517.9774647887324,NaNL519.1133802816902,NaNL519.1133802816902,NaNL520.2492957746479,NaNL520.2492957746479,NaNL521.3852112676057,NaNL521.3852112676057,NaNL522.5211267605634,NaNL522.5211267605634,NaNL523.6570422535211,NaNL523.6570422535211,NaNL524.7929577464789,NaNL524.7929577464789,NaNL525.9288732394366,NaNL525.9288732394366,NaNL527.0647887323944,NaNL527.0647887323944,NaNL528.2007042253521,NaNL528.2007042253521,NaNL529.3366197183099,NaNL529.3366197183099,NaNL530.4725352112677,NaNL530.4725352112677,NaNL531.6084507042253,NaNL531.6084507042253,NaNL532.7443661971831,NaNL532.7443661971831,NaNL533.8802816901408,NaNL533.8802816901408,NaNL535.0161971830986,NaNL535.0161971830986,NaNL536.1521126760564,NaNL536.1521126760564,NaNL537.2880281690141,NaNL537.2880281690141,NaNL538.4239436619719,NaNL538.4239436619719,NaNL539.5598591549295,NaNL539.5598591549295,NaNL540.6957746478873,NaNL540.6957746478873,NaNL541.831690140845,NaNL541.831690140845,NaNL542.9676056338028,NaNL542.9676056338028,NaNL544.1035211267606,NaNL544.1035211267606,NaNL545.2394366197183,NaNL545.2394366197183,NaNL546.3753521126761,NaNL546.3753521126761,NaNL547.5112676056337,NaNL547.5112676056337,NaNL548.6471830985915,NaNL548.6471830985915,NaNL549.7830985915493,NaNL549.7830985915493,NaNL550.919014084507,NaNL550.919014084507,NaNL552.0549295774648,NaNL552.0549295774648,NaNL553.1908450704225,NaNL553.1908450704225,NaNL554.3267605633803,NaNL554.3267605633803,NaNL555.462676056338,NaNL555.462676056338,NaNL556.5985915492957,NaNL556.5985915492957,NaNL557.7345070422535,NaNL557.7345070422535,NaNL558.8704225352112,NaNL558.8704225352112,NaNL560.006338028169,NaNL560.006338028169,NaNL561.1422535211267,NaNL561.1422535211267,NaNL562.2781690140845,NaNL562.2781690140845,NaNL563.4140845070423,NaNL563.4140845070423,NaNL564.55,NaNL564.55,NaNL565.6859154929577,NaNL565.6859154929577,NaNL566.8218309859154,NaNL566.8218309859154,NaNL567.9577464788732,NaNL567.9577464788732,NaNL569.0936619718309,NaNL569.0936619718309,NaNL570.2295774647887,NaNL570.2295774647887,NaNL571.3654929577465,NaNL571.3654929577465,NaNL572.5014084507043,NaNL572.5014084507043,NaNL573.6373239436621,NaNL573.6373239436621,NaNL574.7732394366197,NaNL574.7732394366197,NaNL575.9091549295775,NaNL575.9091549295775,NaNL577.0450704225352,NaNL577.0450704225352,NaNL578.180985915493,NaNL578.180985915493,NaNL579.3169014084507,NaNL579.3169014084507,NaNL580.4528169014085,NaNL580.4528169014085,NaNL581.5887323943663,NaNL581.5887323943663,NaNL582.724647887324,NaNL582.724647887324,NaNL583.8605633802817,NaNL583.8605633802817,NaNL584.9964788732394,NaNL584.9964788732394,NaNL586.1323943661972,NaNL586.1323943661972,NaNL587.2683098591549,NaNL587.2683098591549,NaNL588.4042253521127,NaNL588.4042253521127,NaNL589.5401408450705,NaNL589.5401408450705,NaNL590.6760563380282,NaNL590.6760563380282,NaNL591.811971830986,NaNL591.811971830986,NaNL592.9478873239436,NaNL592.9478873239436,NaNL594.0838028169014,NaNL594.0838028169014,NaNL595.2197183098592,NaNL595.2197183098592,NaNL596.3556338028169,NaNL596.3556338028169,NaNL597.4915492957747,NaNL597.4915492957747,NaNL598.6274647887324,NaNL598.6274647887324,NaNL599.7633802816902,NaNL599.7633802816902,NaNL600.8992957746478,NaNL600.8992957746478,NaNL602.0352112676056,NaNL602.0352112676056,NaNL603.1711267605634,NaNL603.1711267605634,NaNL604.3070422535211,NaNL604.3070422535211,NaNL605.4429577464789,NaNL605.4429577464789,NaNL606.5788732394366,NaNL606.5788732394366,NaNL607.7147887323944,NaNL607.7147887323944,NaNL608.8507042253522,NaNL608.8507042253522,NaNL609.9866197183098,NaNL609.9866197183098,NaNL611.1225352112676,NaNL611.1225352112676,NaNL612.2584507042253,NaNL612.2584507042253,NaNL613.3943661971831,NaNL613.3943661971831,NaNL614.5302816901408,NaNL614.5302816901408,NaNL615.6661971830986,NaNL615.6661971830986,NaNL616.8021126760564,NaNL616.8021126760564,NaNL617.938028169014,NaNL617.938028169014,NaNL619.0739436619718,NaNL619.0739436619718,NaNL620.2098591549295,NaNL620.2098591549295,NaNL621.3457746478873,NaNL621.3457746478873,NaNL622.4816901408451,NaNL622.4816901408451,NaNL623.6176056338028,NaNL623.6176056338028,NaNL624.7535211267606,NaNL624.7535211267606,NaNL625.8894366197183,NaNL625.8894366197183,NaNL627.025352112676,NaNL627.025352112676,NaNL628.1612676056337,NaNL628.1612676056337,NaNL629.2971830985915,NaNL629.2971830985915,NaNL630.4330985915493,NaNL630.4330985915493,NaNL631.569014084507,NaNL631.569014084507,NaNL632.7049295774648,NaNL632.7049295774648,NaNL633.8408450704225,NaNL633.8408450704225,NaNL634.9767605633803,NaNL634.9767605633803,NaNL636.1126760563379,NaNL636.1126760563379,NaNL637.2485915492957,NaNL637.2485915492957,NaNL638.3845070422535,NaNL638.3845070422535,NaNL639.5204225352113,NaNL639.5204225352113,NaNL640.6563380281691,NaNL640.6563380281691,NaNL641.7922535211268,NaNL641.7922535211268,NaNL642.9281690140846,NaNL642.9281690140846,NaNL644.0640845070423,NaNL644.0640845070423,NaNL645.2,NaNL645.2,NaNL646.3359154929577,NaNL646.3359154929577,NaNL647.4718309859155,NaNL647.4718309859155,NaNL648.6077464788733,NaNL648.6077464788733,NaNL649.743661971831,NaNL649.743661971831,NaNL650.8795774647888,NaNL650.8795774647888,NaNL652.0154929577465,NaNL652.0154929577465,NaNL653.1514084507043,NaNL653.1514084507043,NaNL654.287323943662,NaNL654.287323943662,NaNL655.4232394366197,NaNL655.4232394366197,NaNL656.5591549295775,NaNL656.5591549295775,NaNL657.6950704225352,NaNL657.6950704225352,NaNL658.830985915493,NaNL658.830985915493,NaNL659.9669014084507,NaNL659.9669014084507,NaNL661.1028169014085,NaNL661.1028169014085,NaNL662.2387323943663,NaNL662.2387323943663,NaNL663.3746478873239,NaNL663.3746478873239,NaNL664.5105633802817,NaNL664.5105633802817,NaNL665.6464788732394,NaNL665.6464788732394,NaNL666.7823943661972,NaNL666.7823943661972,NaNL667.918309859155,NaNL667.918309859155,NaNL669.0542253521127,NaNL669.0542253521127,NaNL670.1901408450705,NaNL670.1901408450705,NaNL671.3260563380281,NaNL671.3260563380281,NaNL672.4619718309859,NaNL672.4619718309859,NaNL673.5978873239436,NaNL673.5978873239436,NaNL674.7338028169014,NaNL674.7338028169014,NaNL675.8697183098592,NaNL675.8697183098592,NaNL677.0056338028169,NaNL677.0056338028169,NaNL678.1415492957747,NaNL678.1415492957747,NaNL679.2774647887323,NaNL679.2774647887323,NaNL680.4133802816901,NaNL680.4133802816901,NaNL681.5492957746479,NaNL681.5492957746479,NaNL682.6852112676056,NaNL682.6852112676056,NaNL683.8211267605634,NaNL683.8211267605634,NaNL684.9570422535211,NaNL684.9570422535211,NaNL686.0929577464789,NaNL686.0929577464789,NaNL687.2288732394366,NaNL687.2288732394366,NaNL688.3647887323943,NaNL688.3647887323943,NaNL689.5007042253521,NaNL689.5007042253521,NaNL690.6366197183098,NaNL690.6366197183098,NaNL691.7725352112676,NaNL691.7725352112676,NaNL692.9084507042253,NaNL692.9084507042253,NaNL694.0443661971831,NaNL694.0443661971831,NaNL695.1802816901408,NaNL695.1802816901408,NaNL696.3161971830986,NaNL696.3161971830986,NaNL697.4521126760563,NaNL697.4521126760563,NaNL698.588028169014,NaNL698.588028169014,NaNL699.7239436619718,NaNL699.7239436619718,NaNL700.8598591549295,NaNL700.8598591549295,NaNL701.9957746478873,NaNL701.9957746478873,NaNL703.1316901408451,NaNL703.1316901408451,NaNL704.2676056338028,NaNL704.2676056338028,NaNL705.4035211267606,NaNL705.4035211267606,NaNL706.5394366197183,NaNL706.5394366197183,NaNL707.6753521126761,NaNL707.6753521126761,NaNL708.8112676056338,NaNL708.8112676056338,NaNL709.9471830985916,NaNL709.9471830985916,NaNL711.0830985915493,NaNL711.0830985915493,NaNL712.2190140845071,NaNL712.2190140845071,NaNL713.3549295774649,NaNL713.3549295774649,NaNL714.4908450704226,NaNL714.4908450704226,NaNL715.6267605633803,NaNL715.6267605633803,NaNL716.762676056338,NaNL716.762676056338,NaNL717.8985915492958,NaNL717.8985915492958,NaNL719.0345070422535,NaNL719.0345070422535,NaNL720.1704225352113,NaNL720.1704225352113,NaNL721.3063380281691,NaNL721.3063380281691,NaNL722.4422535211268,NaNL722.4422535211268,NaNL723.5781690140846,NaNL723.5781690140846,NaNL724.7140845070422,NaNL724.7140845070422,NaNL725.85,NaNL725.85,NaNL726.9859154929578,NaNL726.9859154929578,NaNL728.1218309859155,NaNL728.1218309859155,NaNL796.2767605633803,NaNL796.2767605633803,NaNL864.431690140845,NaNL864.431690140845,NaNL932.5866197183099,NaNL932.5866197183099,NaNL933.7225352112677,NaNL933.7225352112677,NaNL934.8584507042253,NaNL934.8584507042253,NaNL935.9943661971831,NaNL935.9943661971831,NaNL937.1302816901408,NaNL937.1302816901408,NaNL938.2661971830986,NaNL938.2661971830986,NaNL939.4021126760564,NaNL939.4021126760564,NaNL940.5380281690141,NaNL940.5380281690141,NaNL941.6739436619719,NaNL941.6739436619719,NaNL942.8098591549295,NaNL942.8098591549295,NaNL943.9457746478873,NaNL943.9457746478873,NaNL945.081690140845,NaNL945.081690140845,NaNL946.2176056338028,NaNL946.2176056338028,NaNL947.3535211267606,NaNL947.3535211267606,NaNL948.4894366197183,NaNL948.4894366197183,NaNL949.6253521126761,NaNL949.6253521126761,NaNL950.7612676056337,NaNL950.7612676056337,NaNL951.8971830985915,NaNL951.8971830985915,NaNL953.0330985915493,NaNL953.0330985915493,NaNL954.169014084507,NaNL954.169014084507,NaNL955.3049295774648,NaNL955.3049295774648,NaNL956.4408450704225,NaNL956.4408450704225,NaNL957.5767605633803,NaNL957.5767605633803,NaNL958.712676056338,NaNL958.712676056338,NaNL959.8485915492957,NaNL959.8485915492957,NaNL960.9845070422535,NaNL960.9845070422535,NaNL962.1204225352112,NaNL962.1204225352112,NaNL963.256338028169,NaNL963.256338028169,NaNL964.3922535211267,NaNL964.3922535211267,NaNL965.5281690140845,NaNL965.5281690140845,NaNL966.6640845070423,NaNL966.6640845070423,NaNL967.8,NaNL967.8,NaNL968.9359154929577,NaNL968.9359154929577,NaNL970.0718309859154,NaNL970.0718309859154,NaNL971.2077464788732,NaNL971.2077464788732,NaNL972.3436619718309,NaNL972.3436619718309,NaNL973.4795774647887,NaNL973.4795774647887,NaNL974.6154929577465,NaNL974.6154929577465,NaNL975.7514084507042,NaNL975.7514084507042,NaNL976.887323943662,NaNL976.887323943662,NaNL978.0232394366196,NaNL978.0232394366196,NaNL979.1591549295774,NaNL979.1591549295774,NaNL980.2950704225351,NaNL980.2950704225351,NaNL981.4309859154929,NaNL981.4309859154929,NaNL982.5669014084507,NaNL982.5669014084507,NaNL983.7028169014084,NaNL983.7028169014084,NaNL984.8387323943662,NaNL984.8387323943662,NaNL985.9746478873238,NaNL985.9746478873238,NaNL987.1105633802816,NaNL987.1105633802816,NaNL988.2464788732394,NaNL988.2464788732394,NaNL989.3823943661971,NaNL989.3823943661971,NaNL990.5183098591549,NaNL990.5183098591549,NaNL991.6542253521126,NaNL991.6542253521126,NaNL992.7901408450704,NaNL992.7901408450704,NaNL993.926056338028,NaNL993.926056338028,NaNL995.0619718309858,NaNL995.0619718309858,NaNL996.1978873239436,NaNL996.1978873239436,NaNL997.3338028169013,NaNL997.3338028169013,NaNL998.4697183098591,NaNL998.4697183098591,NaNL999.6056338028168,NaNL999.6056338028168,NaNL1000.7415492957746,NaNL1000.7415492957746,NaNL1068.8964788732394,NaNL1068.8964788732394,NaNL1070.0323943661972,NaNL1070.0323943661972,NaNL1071.168309859155,NaNL1071.168309859155,NaNL1072.3042253521128,NaNL1072.3042253521128,NaNL1073.4401408450703,NaNL1073.4401408450703,NaNL1074.5760563380281,NaNL1074.5760563380281,NaNL1075.711971830986,NaNL1075.711971830986,NaNL1076.8478873239437,NaNL1076.8478873239437,NaNL1077.9838028169015,NaNL1077.9838028169015,NaNL1079.119718309859,NaNL1079.119718309859,NaNL1080.2556338028169,NaNL1080.2556338028169,NaNL1081.3915492957747,NaNL1081.3915492957747,NaNL1082.5274647887325,NaNL1082.5274647887325,NaNL1083.66338028169,NaNL1083.66338028169,NaNL1084.7992957746478,NaNL1084.7992957746478,NaNL1085.9352112676056,NaNL1085.9352112676056,NaNL1087.0711267605634,NaNL1087.0711267605634,NaNL1088.2070422535212,NaNL1088.2070422535212,NaNL1089.3429577464788,NaNL1089.3429577464788,NaNL1090.4788732394366,NaNL1090.4788732394366,NaNL1091.6147887323943,NaNL1091.6147887323943,NaNL1092.7507042253521,NaNL1092.7507042253521,NaNL1093.88661971831,NaNL1093.88661971831,NaNL1095.0225352112675,NaNL1095.0225352112675,NaNL1096.1584507042253,NaNL1096.1584507042253,NaNL1097.294366197183,NaNL1097.294366197183,NaNL1098.4302816901409,NaNL1098.4302816901409,NaNL1099.5661971830987,NaNL1099.5661971830987,NaNL1100.7021126760562,NaNL1100.7021126760562,NaNL1101.838028169014,NaNL1101.838028169014,NaNL1102.9739436619718,NaNL1102.9739436619718,NaNL1104.1098591549296,NaNL1104.1098591549296,NaNL1105.2457746478872,NaNL1105.2457746478872,NaNL1106.381690140845,NaNL1106.381690140845,NaNL1107.5176056338028,NaNL1107.5176056338028,NaNL1108.6535211267606,NaNL1108.6535211267606,NaNL1109.7894366197183,NaNL1109.7894366197183,NaNL1110.925352112676,NaNL1110.925352112676,NaNL1112.0612676056337,NaNL1112.0612676056337,NaNL1113.1971830985915,NaNL1113.1971830985915,NaNL1114.3330985915493,NaNL1114.3330985915493,NaNL1115.469014084507,NaNL1115.469014084507,NaNL1116.6049295774646,NaNL1116.6049295774646,NaNL1117.7408450704224,NaNL1117.7408450704224,NaNL1118.8767605633802,NaNL1118.8767605633802,NaNL1120.012676056338,NaNL1120.012676056338,NaNL1121.1485915492958,NaNL1121.1485915492958,NaNL1122.2845070422534,NaNL1122.2845070422534,NaNL1123.4204225352112,NaNL1123.4204225352112,NaNL1124.556338028169,NaNL1124.556338028169,NaNL1125.6922535211268,NaNL1125.6922535211268,NaNL1126.8281690140846,NaNL1126.8281690140846,NaNL1127.9640845070421,NaNL1127.9640845070421,NaNL1129.1,NaNL1129.1,NaNL1130.2359154929577,NaNL1130.2359154929577,NaNL1131.3718309859155,NaNL1131.3718309859155,NaNL1132.507746478873,NaNL1132.507746478873,NaNL1133.6436619718309,NaNL1133.6436619718309,NaNL1134.7795774647886,NaNL1134.7795774647886,NaNL1135.9154929577464,NaNL1135.9154929577464,NaNL1137.0514084507042,NaNL1137.0514084507042,NaNL1138.1873239436618,NaNL1138.1873239436618,NaNL1139.3232394366196,NaNL1139.3232394366196,NaNL1140.4591549295774,NaNL1140.4591549295774,NaNL1141.5950704225352,NaNL1141.5950704225352,NaNL1142.730985915493,NaNL1142.730985915493,NaNL1143.8669014084508,NaNL1143.8669014084508,NaNL1145.0028169014086,NaNL1145.0028169014086,NaNL1146.1387323943663,NaNL1146.1387323943663,NaNL1147.2746478873241,NaNL1147.2746478873241,NaNL1148.4105633802817,NaNL1148.4105633802817,NaNL1149.5464788732395,NaNL1149.5464788732395,NaNL1150.6823943661973,NaNL1150.6823943661973,NaNL1151.818309859155,NaNL1151.818309859155,NaNL1152.9542253521126,NaNL1152.9542253521126,NaNL1154.0901408450704,NaNL1154.0901408450704,NaNL1155.2260563380282,NaNL1155.2260563380282,NaNL1156.361971830986,NaNL1156.361971830986,NaNL1157.4978873239438,NaNL1157.4978873239438,NaNL1158.6338028169014,NaNL1158.6338028169014,NaNL1159.7697183098592,NaNL1159.7697183098592,NaNL1160.905633802817,NaNL1160.905633802817,NaNL1162.0415492957748,NaNL1162.0415492957748,NaNL1163.1774647887326,NaNL1163.1774647887326,NaNL1164.3133802816901,NaNL1164.3133802816901,NaNL1165.449295774648,NaNL1165.449295774648,NaNL1166.5852112676057,NaNL1166.5852112676057,NaNL1167.7211267605635,NaNL1167.7211267605635,NaNL1168.8570422535213,NaNL1168.8570422535213,NaNL1169.9929577464789,NaNL1169.9929577464789,NaNL1171.1288732394366,NaNL1171.1288732394366,NaNL1172.2647887323944,NaNL1172.2647887323944,NaNL1173.4007042253522,NaNL1173.4007042253522,NaNL1174.5366197183098,NaNL1174.5366197183098,NaNL1175.6725352112676,NaNL1175.6725352112676,NaNL1176.8084507042254,NaNL1176.8084507042254,NaNL1177.9443661971832,NaNL1177.9443661971832,NaNL1179.080281690141,NaNL1179.080281690141,NaNL1180.2161971830985,NaNL1180.2161971830985,NaNL1181.3521126760563,NaNL1181.3521126760563,NaNL1182.4880281690141,NaNL1182.4880281690141,NaNL1183.623943661972,NaNL1183.623943661972,NaNL1184.7598591549297,NaNL1184.7598591549297,NaNL1185.8957746478873,NaNL1185.8957746478873,NaNL1187.031690140845,NaNL1187.031690140845,NaNL1188.1676056338029,NaNL1188.1676056338029,NaNL1189.3035211267606,NaNL1189.3035211267606,NaNL1190.4394366197184,NaNL1190.4394366197184,NaNL1191.575352112676,NaNL1191.575352112676,NaNL1192.7112676056338,NaNL1192.7112676056338,NaNL1193.8471830985916,NaNL1193.8471830985916,NaNL1194.9830985915494,NaNL1194.9830985915494,NaNL1196.1190140845072,NaNL1196.1190140845072,NaNL1197.2549295774647,NaNL1197.2549295774647,NaNL1198.3908450704225,NaNL1198.3908450704225,NaNL1199.5267605633803,NaNL1199.5267605633803,NaNL1200.6626760563381,NaNL1200.6626760563381,NaNL1201.7985915492957,NaNL1201.7985915492957,NaNL1202.9345070422535,NaNL1202.9345070422535,NaNL1204.0704225352113,NaNL1204.0704225352113,NaNL1205.206338028169,NaNL1205.206338028169,NaNL1206.3422535211268,NaNL1206.3422535211268,NaNL1207.4781690140844,NaNL1207.4781690140844,NaNL1208.6140845070422,NaNL1208.6140845070422,NaNL1209.75,NaNL1209.75,NaNL1210.8859154929578,NaNL1210.8859154929578,NaNL1212.0218309859156,NaNL1212.0218309859156,NaNL1213.1577464788732,NaNL1213.1577464788732,NaNL1214.293661971831,NaNL1214.293661971831,NaNL1215.4295774647887,NaNL1215.4295774647887,NaNL1216.5654929577465,NaNL1216.5654929577465,NaNL1217.7014084507043,NaNL1217.7014084507043,NaNL1218.8373239436619,NaNL1218.8373239436619,NaNL1219.9732394366197,NaNL1219.9732394366197,NaNL1221.1091549295775,NaNL1221.1091549295775,NaNL1222.2450704225353,NaNL1222.2450704225353,NaNL1223.3809859154928,NaNL1223.3809859154928,NaNL1224.5169014084506,NaNL1224.5169014084506,NaNL1225.6528169014084,NaNL1225.6528169014084,NaNL1226.7887323943662,NaNL1226.7887323943662,NaNL1227.924647887324,NaNL1227.924647887324,NaNL1229.0605633802816,NaNL1229.0605633802816,NaNL1230.1964788732394,NaNL1230.1964788732394,NaNL1231.3323943661971,NaNL1231.3323943661971,NaNL1232.468309859155,NaNL1232.468309859155,NaNL1233.6042253521127,NaNL1233.6042253521127,NaNL1234.7401408450703,NaNL1234.7401408450703,NaNL1235.876056338028,NaNL1235.876056338028,NaNL1237.0119718309859,NaNL1237.0119718309859,NaNL1238.1478873239437,NaNL1238.1478873239437,NaNL1239.2838028169015,NaNL1239.2838028169015,NaNL1240.419718309859,NaNL1240.419718309859,NaNL1241.5556338028168,NaNL1241.5556338028168,NaNL1242.6915492957746,NaNL1242.6915492957746,NaNL1243.8274647887324,NaNL1243.8274647887324,NaNL1244.9633802816902,NaNL1244.9633802816902,NaNL1246.0992957746478,NaNL1246.0992957746478,NaNL1247.2352112676056,NaNL1247.2352112676056,NaNL1248.3711267605634,NaNL1248.3711267605634,NaNL1249.5070422535211,NaNL1249.5070422535211,NaNL1250.6429577464787,NaNL1250.6429577464787,NaNL1251.7788732394365,NaNL1251.7788732394365,NaNL1252.9147887323943,NaNL1252.9147887323943,NaNL1254.050704225352,NaNL1254.050704225352,NaNL1255.1866197183099,NaNL1255.1866197183099,NaNL1256.3225352112674,NaNL1256.3225352112674,NaNL1257.4584507042252,NaNL1257.4584507042252,NaNL1258.594366197183,NaNL1258.594366197183,NaNL1259.7302816901408,NaNL1259.7302816901408,NaNL1260.8661971830986,NaNL1260.8661971830986,NaNL1262.0021126760562,NaNL1262.0021126760562,NaNL1263.138028169014,NaNL1263.138028169014,NaNL1264.2739436619718,NaNL1264.2739436619718,NaNL1265.4098591549296,NaNL1265.4098591549296,NaNL1266.5457746478874,NaNL1266.5457746478874,NaNL1267.681690140845,NaNL1267.681690140845,NaNL1268.8176056338027,NaNL1268.8176056338027,NaNL1269.9535211267605,NaNL1269.9535211267605,NaNL1271.0894366197183,NaNL1271.0894366197183,NaNL1272.2253521126759,NaNL1272.2253521126759,NaNL1273.3612676056337,NaNL1273.3612676056337,NaNL1274.4971830985914,NaNL1274.4971830985914,NaNL1275.6330985915492,NaNL1275.6330985915492,NaNL1276.769014084507,NaNL1276.769014084507,NaNL1277.9049295774648,NaNL1277.9049295774648,NaNL1279.0408450704226,NaNL1279.0408450704226,NaNL1280.1767605633804,NaNL1280.1767605633804,NaNL1281.3126760563382,NaNL1281.3126760563382,NaNL1282.4485915492958,NaNL1282.4485915492958,NaNL1283.5845070422536,NaNL1283.5845070422536,NaNL1284.7204225352114,NaNL1284.7204225352114,NaNL1285.8563380281691,NaNL1285.8563380281691,NaNL1286.992253521127,NaNL1286.992253521127,NaNL1288.1281690140845,NaNL1288.1281690140845,NaNL1289.2640845070423,NaNL1289.2640845070423,NaNL1290.4,NaNL1290.4,NaNL1291.5359154929579,NaNL1291.5359154929579,NaNL1292.6718309859154,NaNL1292.6718309859154,NaNL1293.8077464788732,NaNL1293.8077464788732,NaNL1294.943661971831,NaNL1294.943661971831,NaNL1296.0795774647888,NaNL1296.0795774647888,NaNL1297.2154929577466,NaNL1297.2154929577466,NaNL1298.3514084507042,NaNL1298.3514084507042,NaNL1299.487323943662,NaNL1299.487323943662,NaNL1300.6232394366198,NaNL1300.6232394366198,NaNL1301.7591549295776,NaNL1301.7591549295776,NaNL1302.8950704225354,NaNL1302.8950704225354,NaNL1304.030985915493,NaNL1304.030985915493,NaNL1305.1669014084507,NaNL1305.1669014084507,NaNL1306.3028169014085,NaNL1306.3028169014085,NaNL1307.4387323943663,NaNL1307.4387323943663,NaNL1308.574647887324,NaNL1308.574647887324,NaNL1309.7105633802817,NaNL1309.7105633802817,NaNL1310.8464788732394,NaNL1310.8464788732394,NaNL1311.9823943661972,NaNL1311.9823943661972,NaNL1313.118309859155,NaNL1313.118309859155,NaNL1314.2542253521128,NaNL1314.2542253521128,NaNL1315.3901408450704,NaNL1315.3901408450704,NaNL1316.5260563380282,NaNL1316.5260563380282,NaNL1317.661971830986,NaNL1317.661971830986,NaNL1318.7978873239438,NaNL1318.7978873239438,NaNL1319.9338028169013,NaNL1319.9338028169013,NaNL1321.0697183098591,NaNL1321.0697183098591,NaNL1322.205633802817,NaNL1322.205633802817,NaNL1323.3415492957747,NaNL1323.3415492957747,NaNL1324.4774647887325,NaNL1324.4774647887325,NaNL1325.61338028169,NaNL1325.61338028169,NaNL1326.7492957746479,NaNL1326.7492957746479,NaNL1327.8852112676057,NaNL1327.8852112676057,NaNL1329.0211267605634,NaNL1329.0211267605634,NaNL1330.1570422535212,NaNL1330.1570422535212,NaNL1331.2929577464788,NaNL1331.2929577464788,NaNL1332.4288732394366,NaNL1332.4288732394366,NaNL1333.5647887323944,NaNL1333.5647887323944,NaNL1334.7007042253522,NaNL1334.7007042253522,NaNL1335.83661971831,NaNL1335.83661971831,NaNL1336.9725352112675,NaNL1336.9725352112675,NaNL1338.1084507042253,NaNL1338.1084507042253,NaNL1339.2443661971831,NaNL1339.2443661971831,NaNL1340.380281690141,NaNL1340.380281690141,NaNL1341.5161971830985,NaNL1341.5161971830985,NaNL1342.6521126760563,NaNL1342.6521126760563,NaNL1343.788028169014,NaNL1343.788028169014,NaNL1344.9239436619719,NaNL1344.9239436619719,NaNL1346.0598591549297,NaNL1346.0598591549297,NaNL1347.1957746478872,NaNL1347.1957746478872,NaNL1348.331690140845,NaNL1348.331690140845,NaNL1349.4676056338028,NaNL1349.4676056338028,NaNL1350.6035211267606,NaNL1350.6035211267606,NaNL1351.7394366197184,NaNL1351.7394366197184,NaNL1352.875352112676,NaNL1352.875352112676,NaNL1354.0112676056337,NaNL1354.0112676056337,NaNL1355.1471830985915,NaNL1355.1471830985915,NaNL1356.2830985915493,NaNL1356.2830985915493,NaNL1357.4190140845071,NaNL1357.4190140845071,NaNL1358.5549295774647,NaNL1358.5549295774647,NaNL1359.6908450704225,NaNL1359.6908450704225,NaNL1360.8267605633803,NaNL1360.8267605633803,NaNL1361.962676056338,NaNL1361.962676056338,NaNL1363.0985915492959,NaNL1363.0985915492959,NaNL1364.2345070422534,NaNL1364.2345070422534,NaNL1365.3704225352112,NaNL1365.3704225352112,NaNL1366.506338028169,NaNL1366.506338028169,NaNL1367.6422535211268,NaNL1367.6422535211268,NaNL1368.7781690140844,NaNL1368.7781690140844,NaNL1369.9140845070422,NaNL1369.9140845070422,NaNL1371.05,NaNL1371.05,NaNL1372.1859154929577,NaNL1372.1859154929577,NaNL1373.3218309859155,NaNL1373.3218309859155,NaNL1374.457746478873,NaNL1374.457746478873,NaNL1375.593661971831,NaNL1375.593661971831,NaNL1376.7295774647887,NaNL1376.7295774647887,NaNL1377.8654929577465,NaNL1377.8654929577465,NaNL1379.0014084507043,NaNL1379.0014084507043,NaNL1380.1373239436618,NaNL1380.1373239436618,NaNL1381.2732394366196,NaNL1381.2732394366196,NaNL1382.4091549295774,NaNL1382.4091549295774,NaNL1383.5450704225352,NaNL1383.5450704225352,NaNL1384.680985915493,NaNL1384.680985915493,NaNL1385.8169014084506,NaNL1385.8169014084506,NaNL1386.9528169014084,NaNL1386.9528169014084,NaNL1388.0887323943662,NaNL1388.0887323943662,NaNL1389.224647887324,NaNL1389.224647887324,NaNL1390.3605633802815,NaNL1390.3605633802815,NaNL1391.4964788732393,NaNL1391.4964788732393,NaNL1392.632394366197,NaNL1392.632394366197,NaNL1393.768309859155,NaNL1393.768309859155,NaNL1394.9042253521127,NaNL1394.9042253521127,NaNL1396.0401408450703,NaNL1396.0401408450703,NaNL1397.176056338028,NaNL1397.176056338028,NaNL1398.3119718309858,NaNL1398.3119718309858,NaNL1399.4478873239436,NaNL1399.4478873239436,NaNL1400.5838028169014,NaNL1400.5838028169014,NaNL1401.719718309859,NaNL1401.719718309859,NaNL1402.8556338028168,NaNL1402.8556338028168,NaNL1403.9915492957746,NaNL1403.9915492957746,NaNL1405.1274647887324,NaNL1405.1274647887324,NaNL1406.2633802816902,NaNL1406.2633802816902,NaNL1407.3992957746477,NaNL1407.3992957746477,NaNL1408.5352112676055,NaNL1408.5352112676055,NaNL1409.6711267605633,NaNL1409.6711267605633,NaNL1410.807042253521,NaNL1410.807042253521,NaNL1411.942957746479,NaNL1411.942957746479,NaNL1413.0788732394367,NaNL1413.0788732394367,NaNL1414.2147887323945,NaNL1414.2147887323945,NaNL1415.3507042253523,NaNL1415.3507042253523,NaNL1416.4866197183098,NaNL1416.4866197183098,NaNL1417.6225352112676,NaNL1417.6225352112676,NaNL1418.7584507042254,NaNL1418.7584507042254,NaNL1419.8943661971832,NaNL1419.8943661971832,NaNL1421.030281690141,NaNL1421.030281690141,NaNL1422.1661971830986,NaNL1422.1661971830986,NaNL1423.3021126760564,NaNL1423.3021126760564,NaNL1424.4380281690142,NaNL1424.4380281690142,NaNL1425.573943661972,NaNL1425.573943661972,NaNL1426.7098591549297,NaNL1426.7098591549297,NaNL1427.8457746478873,NaNL1427.8457746478873,NaNL1428.981690140845,NaNL1428.981690140845,NaNL1430.117605633803,NaNL1430.117605633803,NaNL1431.2535211267607,NaNL1431.2535211267607,NaNL1432.3894366197185,NaNL1432.3894366197185,NaNL1433.525352112676,NaNL1433.525352112676,NaNL1434.6612676056338,NaNL1434.6612676056338,NaNL1435.7971830985916,NaNL1435.7971830985916,NaNL1436.9330985915494,NaNL1436.9330985915494,NaNL1438.069014084507,NaNL1438.069014084507,NaNL1439.2049295774648,NaNL1439.2049295774648,NaNL1440.3408450704226,NaNL1440.3408450704226,NaNL1441.4767605633804,NaNL1441.4767605633804,NaNL1442.6126760563382,NaNL1442.6126760563382,NaNL1443.7485915492957,NaNL1443.7485915492957,NaNL1444.8845070422535,NaNL1444.8845070422535,NaNL1446.0204225352113,NaNL1446.0204225352113,NaNL1447.156338028169,NaNL1447.156338028169,NaNL1448.292253521127,NaNL1448.292253521127,NaNL1449.4281690140845,NaNL1449.4281690140845,NaNL1450.5640845070423,NaNL1450.5640845070423,NaNL1451.7,NaNL1451.7,NaNL1452.8359154929578,NaNL1452.8359154929578,NaNL1453.9718309859156,NaNL1453.9718309859156,NaNL1455.1077464788732,NaNL1455.1077464788732,NaNL1456.243661971831,NaNL1456.243661971831,NaNL1457.3795774647888,NaNL1457.3795774647888,NaNL1458.5154929577466,NaNL1458.5154929577466,NaNL1459.6514084507041,NaNL1459.6514084507041,NaNL1460.787323943662,NaNL1460.787323943662,NaNL1461.9232394366197,NaNL1461.9232394366197,NaNL1463.0591549295775,NaNL1463.0591549295775,NaNL1464.1950704225353,NaNL1464.1950704225353,NaNL1465.3309859154929,NaNL1465.3309859154929,NaNL1466.4669014084507,NaNL1466.4669014084507,NaNL1467.6028169014085,NaNL1467.6028169014085,NaNL1468.7387323943663,NaNL1468.7387323943663,NaNL1469.874647887324,NaNL1469.874647887324,NaNL1471.0105633802816,NaNL1471.0105633802816,NaNL1472.1464788732394,NaNL1472.1464788732394,NaNL1473.2823943661972,NaNL1473.2823943661972,NaNL1474.418309859155,NaNL1474.418309859155,NaNL1475.5542253521128,NaNL1475.5542253521128,NaNL1476.6901408450703,NaNL1476.6901408450703,NaNL1477.8260563380281,NaNL1477.8260563380281,NaNL1478.961971830986,NaNL1478.961971830986,NaNL1480.0978873239437,NaNL1480.0978873239437,NaNL1481.2338028169015,NaNL1481.2338028169015,NaNL1482.369718309859,NaNL1482.369718309859,NaNL1483.5056338028169,NaNL1483.5056338028169,NaNL1484.6415492957747,NaNL1484.6415492957747,NaNL1485.7774647887325,NaNL1485.7774647887325,NaNL1486.91338028169,NaNL1486.91338028169,NaNL1488.0492957746478,NaNL1488.0492957746478,NaNL1489.1852112676056,NaNL1489.1852112676056,NaNL1490.3211267605634,NaNL1490.3211267605634,NaNL1491.4570422535212,NaNL1491.4570422535212,NaNL1492.5929577464788,NaNL1492.5929577464788,NaNL1493.7288732394366,NaNL1493.7288732394366,NaNL1494.8647887323943,NaNL1494.8647887323943,NaNL1496.0007042253521,NaNL1496.0007042253521,NaNL1497.13661971831,NaNL1497.13661971831,NaNL1498.2725352112675,NaNL1498.2725352112675,NaNL1499.4084507042253,NaNL1499.4084507042253,NaNL1500.544366197183,NaNL1500.544366197183,NaNL1501.6802816901409,NaNL1501.6802816901409,NaNL1502.8161971830987,NaNL1502.8161971830987,NaNL1503.9521126760562,NaNL1503.9521126760562,NaNL1505.088028169014,NaNL1505.088028169014,NaNL1506.2239436619718,NaNL1506.2239436619718,NaNL1507.3598591549296,NaNL1507.3598591549296,NaNL1508.4957746478872,NaNL1508.4957746478872,NaNL1509.631690140845,NaNL1509.631690140845,NaNL1510.7676056338028,NaNL1510.7676056338028,NaNL1511.9035211267606,NaNL1511.9035211267606,NaNL1513.0394366197183,NaNL1513.0394366197183,NaNL1514.175352112676,NaNL1514.175352112676,NaNL1515.3112676056337,NaNL1515.3112676056337,NaNL1516.4471830985915,NaNL1516.4471830985915,NaNL1517.5830985915493,NaNL1517.5830985915493,NaNL1518.719014084507,NaNL1518.719014084507,NaNL1519.8549295774646,NaNL1519.8549295774646,NaNL1520.9908450704224,NaNL1520.9908450704224,NaNL1522.1267605633802,NaNL1522.1267605633802,NaNL1523.262676056338,NaNL1523.262676056338,NaNL1524.3985915492958,NaNL1524.3985915492958,NaNL1525.5345070422534,NaNL1525.5345070422534,NaNL1526.6704225352112,NaNL1526.6704225352112,NaNL1527.806338028169,NaNL1527.806338028169,NaNL1528.9422535211268,NaNL1528.9422535211268,NaNL1530.0781690140846,NaNL1530.0781690140846,NaNL1531.2140845070421,NaNL1531.2140845070421,NaNL1532.35,NaNL1532.35,NaNL1533.4859154929577,NaNL1533.4859154929577,NaNL1534.6218309859155,NaNL1534.6218309859155,NaNL1535.757746478873,NaNL1535.757746478873,NaNL1536.8936619718309,NaNL1536.8936619718309,NaNL1538.0295774647886,NaNL1538.0295774647886,NaNL1539.1654929577464,NaNL1539.1654929577464,NaNL1540.3014084507042,NaNL1540.3014084507042,NaNL1541.4373239436618,NaNL1541.4373239436618,NaNL1542.5732394366196,NaNL1542.5732394366196,NaNL1543.7091549295774,NaNL1543.7091549295774,NaNL1544.8450704225352,NaNL1544.8450704225352,NaNL1545.980985915493,NaNL1545.980985915493,NaNL1547.1169014084508,NaNL1547.1169014084508,NaNL1548.2528169014086,NaNL1548.2528169014086,NaNL1549.3887323943663,NaNL1549.3887323943663,NaNL1550.5246478873241,NaNL1550.5246478873241,NaNL1551.6605633802817,NaNL1551.6605633802817,NaNL1552.7964788732395,NaNL1552.7964788732395,NaNL1553.9323943661973,NaNL1553.9323943661973,NaNL1555.068309859155,NaNL1555.068309859155,NaNL1556.2042253521126,NaNL1556.2042253521126,NaNL1557.3401408450704,NaNL1557.3401408450704,NaNL1558.4760563380282,NaNL1558.4760563380282,NaNL1559.611971830986,NaNL1559.611971830986,NaNL1560.7478873239438,NaNL1560.7478873239438,NaNL1561.8838028169014,NaNL1561.8838028169014,NaNL1563.0197183098592,NaNL1563.0197183098592,NaNL1564.155633802817,NaNL1564.155633802817,NaNL1565.2915492957748,NaNL1565.2915492957748,NaNL1566.4274647887326,NaNL1566.4274647887326,NaNL1567.5633802816901,NaNL1567.5633802816901,NaNL1568.699295774648,NaNL1568.699295774648,NaNL1569.8352112676057,NaNL1569.8352112676057,NaNL1570.9711267605635,NaNL1570.9711267605635,NaNL1572.1070422535213,NaNL1572.1070422535213,NaNL1573.2429577464789,NaNL1573.2429577464789,NaNL1574.3788732394366,NaNL1574.3788732394366,NaNL1575.5147887323944,NaNL1575.5147887323944,NaNL1576.6507042253522,NaNL1576.6507042253522,NaNL1577.7866197183098,NaNL1577.7866197183098,NaNL1578.9225352112676,NaNL1578.9225352112676,NaNL1580.0584507042254,NaNL1580.0584507042254,NaNL1581.1943661971832,NaNL1581.1943661971832,NaNL1582.330281690141,NaNL1582.330281690141,NaNL1583.4661971830985,NaNL1583.4661971830985,NaNL1584.6021126760563,NaNL1584.6021126760563,NaNL1585.7380281690141,NaNL1585.7380281690141,NaNL1586.873943661972,NaNL1586.873943661972,NaNL1588.0098591549297,NaNL1588.0098591549297,NaNL1589.1457746478873,NaNL1589.1457746478873,NaNL1590.281690140845,NaNL1590.281690140845,NaNL1591.4176056338029,NaNL1591.4176056338029,NaNL1592.5535211267606,NaNL1592.5535211267606,NaNL1593.6894366197184,NaNL1593.6894366197184,NaNL1594.825352112676,NaNL1594.825352112676,NaNL1595.9612676056338,NaNL1595.9612676056338,NaNL1597.0971830985916,NaNL1597.0971830985916,NaNL1598.2330985915494,NaNL1598.2330985915494,NaNL1599.3690140845072,NaNL1599.3690140845072,NaNL1600.5049295774647,NaNL1600.5049295774647,NaNL1601.6408450704225,NaNL1601.6408450704225,NaNL1602.7767605633803,NaNL1602.7767605633803,NaNL1603.9126760563381,NaNL1603.9126760563381,NaNL1605.0485915492957,NaNL1605.0485915492957,NaNL1606.1845070422535,NaNL1606.1845070422535,NaNL1607.3204225352113,NaNL1607.3204225352113,NaNL1608.456338028169,NaNL1608.456338028169,NaNL1609.5922535211268,NaNL1609.5922535211268,NaNL1610.7281690140844,NaNL1610.7281690140844,NaNL1611.8640845070422,NaNL1611.8640845070422,NaNL1613,NaNL1613,NaN" style="opacity: 1;">
+												</path>
+											</g>
+										</g>
+										<g class="dot-data"></g>
+									</g>
+
+									<g class="overlay">
+										<g class="symbols" clip-path="url(#clipping-path-a295aab6-cdf7-4c5a-92cf-293fe5d3f612)">
+											<g class="hlines"></g>
+											<g class="vlines"></g>
+										</g>
+										<line class="tooltip-line" style="opacity: 0;" x1="109.04788732394366" x2="109.04788732394366" y1="0" y2="423"> </line>
+										<g class="tooltip-dots" style="opacity: 0;">
+											<g class="tooltip-dots-group">
+												<circle class="tooltip-dot y1" r="3" cx="109.04788732394366" cy="78.02621940619522" stroke="#FF9900"></circle>
+												<circle class="tooltip-dot y0" style="display: none;"></circle>
+											</g>
+										</g>
+									</g>
+								</g>  // area data
+								<rect class="chart-brush"></rect>
+
+							</svg>
+
+							<div class="chart-tooltip" style="left: 169.048px; top: 10px; display: none;">
+								<div class="abscissas">Sat 4 Feb 2023 16:56:00</div>
+									<div class="tooltip-item">
+										<div class="color-dot" style="background-color: rgb(255,153,0);">
+										</div>
+										<div class="series-label">TibberHourlyConsumption</div>
+											<div class="y-value"> 0.528 kWh</div>
+										</div>
+									</div>
+									<div class="chart-legend" style="position: absolute;">
+										<div class="item line">
+											<div class="icon" style="background-color: rgb(255,153,0);"></div>
+											<div class="legend-label">TibberHourlyConsumption</div>
+										</div>
+										<div class="item line">
+											<div class="icon" style="background-color: rgb(0,255,255);"></div>
+											<div class="legend-label">a006</div>
+										</div>
+									</div>
+								</div>
+								<!-- end ngIf: vm.interactiveChartReady -->
+
+								</div>
+								<!-- end ngIf: vm.widget.charttype==='interactive' -->
+							</div>
+
+						</widget-chart>
+					</generic-widget>
+			</div>
+		</li>
+		<!-- end ngRepeat: widget in vm.dashboard.widgets -->
+    </ul>
+</div>
+
+

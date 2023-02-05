@@ -4,6 +4,10 @@ HABPanel is a lightweight dashboard interface for openHAB.
 
 It notably features an embedded dashboard designer allowing to build interfaces easily right on the target device.
 
+comment: 04feb22 PtrO
+Note: This file https://github.com/openhab/org.openhab.ui.habpanel is kept for history,
+new location is https://github.com/openhab/openhab-webui
+
 ## Configuration
 
 Unlike Basic UI and other interfaces, HABPanel doesn't use pre-configured sitemaps.
