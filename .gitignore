@@ -1,4 +1,14 @@
+
+# ignore vscode 08mar24
+.vscode/
+.classpath
 .settings
+*.code-workspace
+.project
+*.deleted
+*.org
+oh240_*.txt
+
 target/
 bin/
 .antlr*
@@ -7,7 +17,10 @@ bin/
 node_modules
 bower_components
 .tmp
-.vscode
 .sass-cache
 nbproject
 coverage
+
+
+
+
