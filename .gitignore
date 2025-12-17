@@ -21,6 +21,9 @@ bower_components
 nbproject
 coverage
 
+# 17dec25 ptro save/ignore
+target2/
+target3/
 
 
 
