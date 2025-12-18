@@ -83,6 +83,7 @@
             <id>jcenter</id>
             <name>JCenter Repository</name>
             <url>https://jcenter.bintray.com/</url>
+            <!-- going to https://repo1.maven.org/maven2/ -->
             <releases>
                 <enabled>true</enabled>
                 <updatePolicy>never</updatePolicy>
@@ -95,6 +96,7 @@
             <id>openhab-artifactory-release</id>
             <name>JFrog Artifactory Repository</name>
             <url>https://openhab.jfrog.io/openhab/libs-release</url>
+            <!-- resolves to https://openhab.jfrog.io/ui/native/libs-release-->            
             <releases>
                 <enabled>true</enabled>
                 <updatePolicy>never</updatePolicy>
@@ -109,6 +111,7 @@
             <id>openhab-artifactory-snapshot</id>
             <name>JFrog Artifactory Repository</name>
             <url>https://openhab.jfrog.io/openhab/libs-snapshot</url>
+            <!-- resolves to https://openhab.jfrog.io/ui/native/libs-snapshot-->
             <releases>
                 <enabled>false</enabled>
             </releases>
@@ -119,11 +122,12 @@
         </repository>
 
         <!-- openHAB dependencies p2 repository -->
+    <!-- No more p2
         <repository>
             <id>p2-openhab-deps-repo</id>
             <url>https://dl.bintray.com/openhab/p2/openhab-deps-repo/${ohdr.version}</url>
             <layout>p2</layout>
-        </repository>
+        </repository> -->
     </repositories>
 
 </project>
