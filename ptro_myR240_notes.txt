@@ -1,3 +1,10 @@
+
+
+12sep26 opened branch
+	- purpose fix default start color bluw which is not display correctly on a black backgrond.
+12sep26 confirmed/closed branch [08mar24 faefd90] 08mar24 12sep26 sync update to be sure
+
+
 05feb23 tldr; Analyze NaN on interacrtive chart widget was caused by immuable "datapoint.state.replace(...);" in .../web/app/widgets/chart/chart.widget.js
 
 ---
@@ -23,7 +30,7 @@ Check if we have the correct weblocation by setting & checking our own runtime f
 	Note: this is also done to differentiate our modified habpanel from original
 
 Investigate FireFox browser result where "NaN"is displayed....
-	5a) open browser in source/inspect mode 
+	5a) open browser in source/inspect mode
 	5b) analyse source, beautify tio idented sections and ... in long lines we see 'Nan's with section path class="line"
 	5c) part of upper located section ng-if="vm.widget.charttype==='interactive'"
 
@@ -36,8 +43,8 @@ Now we have de script & location and must search the cause for NaN
 	7b) Note: a switch type item is stored in RRD by either NaN, a 1 of 0 (all scrings) which is translated by API to  null/ON/OFF
 	7c) It apperars that the Javascript immuable tries to convert ON/OFF back to numertic for the chart
 		--> datapoint.state.replace("OFF",0);
-		--> datapoint.state.replace("ON",0);    
-	7d) this fails as the test does/didnot assign the value back which we corrected to 
+		--> datapoint.state.replace("ON",0);
+	7d) this fails as the test does/didnot assign the value back which we corrected to
 		--> datapoint.state = datapoint.state.replace("OFF",0);
 		--> datapoint.state = datapoint.state.replace("ON",1);
 	7e) we could/shpoud also add an extra test like : if (isNaN(datapoint.state)).....
@@ -46,7 +53,7 @@ After applying the fix, the chart now nicely show 0/1 for OFF/ON item which are 
 
 Below the detailed workbook analysis of the section that shows the chart
 
---- 
+---
 
 chart is created by:  /home/pafoxp/code-openhab/got-habpanel_R240/web/app/widgets/chart/chart.widget.js
 		<div class="chart-content ng-scope" ng-if="vm.widget.charttype==='interactive'" style="height: calc(100% - 2em)">
@@ -61,7 +68,7 @@ chart is created by:  /home/pafoxp/code-openhab/got-habpanel_R240/web/app/widget
 			<svg class="cha
 [/share/Rdisk/Info/openhab/pafoqnap/userdata] $ date -d @1675573200 Sun Feb  5 06:00:00 CET 2023
 
-rt" width="1693" height="463">	
+rt" width="1693" height="463">
 
 Strange behavior: (seconds)
 
