@@ -1,7 +1,25 @@
 
 
-12sep26 opened branch
+12sep26 opened branch $ git push --set-upstream origin 12sep26
+		chart service in UI: [/home/pafoxp/code-openhab/ptrooms_smarthome/bundles/ui/org.eclipse.smarthome.ui]
+
+			using: [/home/pafoxp/code-openhab/XChart-xchart-2.6.1]
+			default color series via
+				[/home/pafoxp/code-openhab/XChart-xchart-2.6.1/xchart/src/main/java/org/knowm/xchart/SeriesColor.java]
+				that starts with /** BLUE */  BLUE(0, new Color(0, 55, 255, 180)),
+
+
+
+		rrdd 10 years:
+
+		/media/Rdisk/Info/openhab/pafoqnap/addons/mapdb0_org.openhab.persistence.mapdb-1.14.0-SNAPSHOT.jar
+
 	- purpose fix default start color bluw which is not display correctly on a black backgrond.
+	-	/home/pafoxp/code-openhab/git-habpanel_R240/web/app/widgets/chart/chart.widget.js
+			<img src="http://192.168.1.8:8090/chart?items=0ZL4_Power&amp;
+				period=D&amp;legend=true&amp;theme=dark&amp;w=958&amp;h=400&amp;random=1&amp;service=rrd4j"
+
+
 12sep26 confirmed/closed branch [08mar24 faefd90] 08mar24 12sep26 sync update to be sure
 
 
