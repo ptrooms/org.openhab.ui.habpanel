@@ -1,4 +1,5 @@
-
+# PtrO 20260912 12:15 ignore jar distribution
+*.jar
 # ignore vscode 08mar24
 .vscode/
 .classpath
